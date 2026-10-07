@@ -294,6 +294,7 @@
   #boardList .you { font-family: var(--body); font-weight: 700; font-size: 10px; color: var(--ink); background: var(--green); border-radius: 6px; padding: 1px 6px; margin-left: 8px; }
   .empty { color: var(--muted); font-weight: 600; margin: 22px 0; }
   .foot { color: var(--muted); font-size: 12px; font-weight: 600; margin: 8px 0 16px; }
+  .foot .live { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); margin-right: 7px; }
 
   @keyframes bobble { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-10px) rotate(1.2deg); } }
 
@@ -457,7 +458,7 @@
     <p class="sub" style="margin-bottom:0">Top 10 players</p>
     <ol id="boardList"></ol>
     <p class="empty" id="boardEmpty" hidden>No scores yet. Play a round to claim the top spot.</p>
-    <p class="foot">Scores are saved on this device.</p>
+    <p class="foot" id="boardFoot">Loading scores.</p>
     <button class="btn purple wide" type="button" data-close="boardModal">Close</button>
   </div>
 </div>
@@ -482,7 +483,7 @@
 
   // =====================================================================
   //  STORAGE  (the leaderboard lives behind two functions: saveScore and
-  //  loadBoard. Version 2 swaps only these two for the online database.)
+  //  loadBoard. They use the online database, and fall back to this device.)
   // =====================================================================
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -493,15 +494,65 @@
   let runs = store.get('cmo.scores', []);
   if (!Array.isArray(runs)) runs = [];
 
+  // ---------- Online leaderboard (Supabase) ----------
+  // These keys are public by design: they can only read the board and add a
+  // score. The database itself blocks edits, deletes and impossible values.
+  const DB_URL = 'https://evegvpegdfeexthknwkq.supabase.co/rest/v1';
+  const DB_KEYS = ['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV2ZWd2cGVnZGZlZXh0aGtud2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzNDc1MzgsImV4cCI6MjEwNjkyMzUzOH0.AP-SmpeoalEenvidzEzkmhdwVG9L0DnY5JosteZem6E', 'sb_publishable_qxrJtBxulYzdevSxDvw2RA_YSBURylw'];
+  let dbKey = 0;
+  let online = false;        // true once the shared board has loaded
+  let remote = [];           // best score per player, from the database
+  let sessionRuns = [];      // scores made since this page opened
+
+  async function db(path, options) {
+    for (let attempt = 0; attempt < DB_KEYS.length; attempt++) {
+      const key = DB_KEYS[dbKey];
+      const headers = Object.assign({ apikey: key }, key.startsWith('eyJ') ? { Authorization: 'Bearer ' + key } : {}, options && options.headers);
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 7000);
+      try {
+        const res = await fetch(DB_URL + path, Object.assign({}, options, { headers, signal: ctl.signal }));
+        if (res.status === 401 || res.status === 403) { dbKey = (dbKey + 1) % DB_KEYS.length; continue; }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res;
+      } finally { clearTimeout(timer); }
+    }
+    throw new Error('Not authorised');
+  }
+  async function fetchBoard() {
+    try {
+      const res = await db('/leaderboard?select=name,score,seconds,created_at&order=score.desc,created_at.asc&limit=200');
+      const rows = await res.json();
+      remote = rows.map(r => ({ n: String(r.name), s: Number(r.score) || 0, t: Number(r.seconds) || 0, at: Date.parse(r.created_at) || 0 }));
+      online = true;
+    } catch (e) { online = false; }
+    onBoardChanged();
+    return online;
+  }
+  async function postScore(entry) {
+    try {
+      await db('/scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({ name: entry.n, score: entry.s, seconds: entry.t })
+      });
+      await fetchBoard();
+    } catch (e) { online = false; onBoardChanged(); }
+  }
+
+  // The two functions the rest of the game uses.
   function saveScore(entry) {
     runs.push(entry);
     if (runs.length > 300) runs = runs.slice(-300);
     store.set('cmo.scores', runs);
+    sessionRuns.push(entry);
+    if (entry.s > 0) postScore(entry);
   }
-  // Best score per player, highest first.
+  // Best score per player, highest first. Online: the shared board plus
+  // anything scored in this session. Offline: scores saved on this device.
   function loadBoard() {
     const best = new Map();
-    for (const r of runs) {
+    for (const r of (online ? remote.concat(sessionRuns) : runs)) {
       if (!r || typeof r.n !== 'string' || typeof r.s !== 'number') continue;
       const cur = best.get(r.n);
       if (!cur || r.s > cur.s) best.set(r.n, r);
@@ -1022,6 +1073,7 @@
     dash.t = 0; dash.cd = 0; dash.inv = 0; dash.dx = 1; dash.dy = 0;
     ghosts = [];
     rivals = loadBoard().filter(r => r.s > 0);
+    fetchBoard();
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     state = 'play';
     $('title').hidden = true;
@@ -1140,10 +1192,18 @@
     $('hud').hidden = true;
   }
 
+  let overPrevBest = 0;
   function showGameOver() {
     overShown = true;
-    const prevBest = bestOf(playerName);
+    overPrevBest = bestOf(playerName);
     saveScore({ n: playerName || 'PLAYER', s: score, t: Math.round(elapsed), at: Date.now() });
+    renderOver();
+    open('overModal');
+    paintStatics();
+    $('againBtn').focus({ preventScroll: true });
+  }
+  function renderOver() {
+    const prevBest = overPrevBest;
     const board = loadBoard();
     const me = playerName || 'PLAYER';
     const rank = board.findIndex(r => r.n === me) + 1;
@@ -1153,19 +1213,22 @@
     $('overBest').textContent = myBest;
     $('overTime').textContent = Math.floor(elapsed / 60) + ':' + String(Math.floor(elapsed % 60)).padStart(2, '0');
     $('newBest').hidden = !(score > prevBest && score > 0);
-    $('rankMe').textContent = 'You are #' + rank;
+    $('rankMe').textContent = rank ? 'You are #' + rank + (online ? ' overall' : ' on this device') : 'Not ranked yet';
     $('rankTop').innerHTML = board.slice(0, 3).map((r, i) => `${i + 1}. ${esc(r.n)} <b>${r.s}</b>`).join(' &nbsp; ');
-    const above = board.filter(r => r.s > score && r.n !== me).pop();
+    const above = board.filter(r => r.s > myBest && r.n !== me).pop();
     let msg;
     if (score === 0) msg = 'Collect a yellow dot to start scoring.';
     else if (rank === 1 && board.length > 1) msg = 'Top of the board. Nobody has beaten you.';
-    else if (above) msg = `${above.s - score + 1} more to pass ${above.n}.`;
+    else if (above) msg = `${above.s - myBest + 1} more to pass ${above.n}.`;
     else if (score < myBest) msg = `${myBest - score + 1} more to beat your best.`;
     else msg = 'First score on the board. Now defend it.';
     $('overMsg').textContent = msg;
-    open('overModal');
-    paintStatics();
-    $('againBtn').focus({ preventScroll: true });
+  }
+  // Called whenever the shared board loads or changes.
+  function onBoardChanged() {
+    if (state === 'title') refreshTitle();
+    if (state === 'over' && overShown) renderOver();
+    if (isOpen('boardModal')) renderBoard();
   }
 
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1609,16 +1672,31 @@
     if (next) next();
   }
 
-  function openBoard() {
-    sfx.click();
-    const board = loadBoard().slice(0, 10);
+  let boardPoll = 0;
+  function renderBoard() {
+    const all = loadBoard();
+    const board = all.slice(0, 10);
+    const row = (r, i) =>
+      `<li class="r${i + 1}${r.n === playerName ? ' me' : ''}"><span class="rk">#${i + 1}</span><span class="nm">${esc(r.n)}${r.n === playerName ? '<span class="you">YOU</span>' : ''}</span><span class="sc">${r.s}<small>PTS</small></span></li>`;
+    let html = board.map(row).join('');
+    // Outside the top 10? Show your own row underneath.
+    const mine = all.findIndex(r => r.n === playerName);
+    if (mine >= 10) html += row(all[mine], mine);
     const list = $('boardList');
-    list.innerHTML = board.map((r, i) =>
-      `<li class="r${i + 1}${r.n === playerName ? ' me' : ''}"><span class="rk">#${i + 1}</span><span class="nm">${esc(r.n)}${r.n === playerName ? '<span class="you">YOU</span>' : ''}</span><span class="sc">${r.s}<small>PTS</small></span></li>`
-    ).join('');
+    list.innerHTML = html;
     $('boardEmpty').hidden = board.length > 0;
     list.hidden = board.length === 0;
+    $('boardFoot').innerHTML = online
+      ? '<span class="live"></span>Live. Scores from every phone and laptop.'
+      : 'Offline. Showing scores saved on this device.';
+  }
+  function openBoard() {
+    sfx.click();
+    renderBoard();
     open('boardModal');
+    fetchBoard();
+    clearInterval(boardPoll);
+    boardPoll = setInterval(() => { if (isOpen('boardModal')) fetchBoard(); else clearInterval(boardPoll); }, 12000);
   }
 
   function pause() {
@@ -1746,6 +1824,7 @@
   resize();
   setupTitleScene();
   refreshTitle();
+  fetchBoard();
   // Redraw the digit artwork once the Bungee font has loaded.
   if (document.fonts && document.fonts.load) {
     document.fonts.load(`64px 'Bungee'`).then(() => { buildGlyphs(); if (state === 'title') setupTitleScene(); }).catch(() => {});
