@@ -162,7 +162,18 @@
   #dashBtn:active { transform: translateY(4px); }
   #dashLbl { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); font-size: 10px; color: var(--cyan); padding: 3px 9px; pointer-events: none; white-space: nowrap; }
   #dashLbl kbd { font-family: var(--game); font-size: 9px; color: #fff; background: var(--panel-line); border-radius: 5px; padding: 1px 5px; }
-  #eventChip { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); flex-direction: column; gap: 5px; min-width: 190px; padding: 7px 14px 9px; font-size: 13px; color: var(--yellow); pointer-events: none; }
+  #danger { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); gap: 8px; font-size: 10px; color: var(--muted); padding: 6px 12px; pointer-events: none; }
+  #danger .bar { display: block; width: 130px; height: 10px; background: var(--well); border-radius: 99px; overflow: hidden; }
+  #danger .bar i { display: block; height: 100%; width: 0%; border-radius: 99px; background: linear-gradient(90deg, var(--green), var(--yellow) 55%, var(--pink)); background-size: 130px 100%; }
+  #combo { position: absolute; right: 16px; bottom: 16px; flex-direction: column; gap: 3px; font-size: 10px; color: var(--yellow); border-color: var(--yellow); padding: 6px 14px 9px; pointer-events: none; }
+  #combo b { font-weight: 400; font-size: 22px; line-height: 1; color: #fff; }
+  #combo .bar { display: block; width: 62px; height: 5px; background: var(--well); border-radius: 99px; overflow: hidden; }
+  #combo .bar i { display: block; height: 100%; width: 100%; background: var(--yellow); border-radius: 99px; }
+  .evcard.rain { background: linear-gradient(180deg, #6fe0ff 0%, #24a4ff 70%, #1273d6 100%); }
+  .tabs { display: inline-flex; gap: 4px; margin-top: 8px; padding: 4px; background: var(--well); border: 2px solid var(--panel-line); border-radius: 999px; }
+  .tab { font-family: var(--game); text-transform: uppercase; font-size: 13px; border: 0; border-radius: 999px; padding: 6px 18px; background: transparent; color: var(--muted); }
+  .tab.on { background: linear-gradient(180deg, #62ffad 0%, #3dff9a 60%, #1fd977 100%); color: var(--ink); box-shadow: 0 3px 0 #0b4528; }
+  #eventChip { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); flex-direction: column; gap: 5px; min-width: 190px; padding: 7px 14px 9px; font-size: 13px; color: var(--yellow); pointer-events: none; }
   #eventChip .bar { display: block; width: 100%; height: 8px; background: var(--well); border-radius: 99px; overflow: hidden; }
   #eventChip .bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, var(--yellow), var(--orange)); border-radius: 99px; }
   #eventBanner { position: absolute; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; pointer-events: none; background: rgba(7, 6, 23, 0.45); }
@@ -312,6 +323,11 @@
     .btn { font-size: 17px; }
     .round { width: 46px; height: 46px; }
     #eventChip { top: 104px; }
+    #danger .lbl { display: none; }
+    #danger { padding: 6px 9px; }
+    #danger .bar { width: 92px; }
+    #danger .bar i { background-size: 92px 100%; }
+    #combo { bottom: 120px; }
     #moveHint { bottom: 120px; max-width: none; }
   }
   @media (max-width: 520px) {
@@ -361,7 +377,9 @@
   <button id="pauseBtn" class="round" type="button" aria-label="Pause game">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
   </button>
+  <div id="danger" class="chip"><span class="lbl">Danger</span><span class="bar"><i id="dangerBar"></i></span></div>
   <div id="nextChip" class="chip">Next event <b id="nextVal">10</b></div>
+  <div id="combo" class="chip" hidden>Combo <b id="comboVal">x2</b><span class="bar"><i id="comboBar"></i></span></div>
   <div id="rival" class="chip" hidden></div>
   <div id="eventChip" class="chip" hidden><span id="eventName"></span><span class="bar"><i id="eventBar"></i></span></div>
   <div id="moveHint" class="chip"></div>
@@ -386,7 +404,7 @@
       <div class="step"><span class="n">Step 3</span><canvas id="ill3"></canvas><h3>Dodge the numbers</h3><p>One touch and it's game over. Higher numbers move faster.</p></div>
     </div>
     <div class="keys" id="keysRow"></div>
-    <p class="tips">A dash passes straight through a number. The orange dot takes 3 off your score. Every 10 points brings a surprise event.</p>
+    <p class="tips">A dash passes straight through a number. Collect dots quickly for a combo: from x3, each dot is worth 2. The orange dot takes 3 off your score. Every 10 points brings a surprise event.</p>
     <button id="gotItBtn" class="btn green wide" type="button">Got it!</button>
   </div>
 </div>
@@ -455,7 +473,10 @@
   <div class="card" role="dialog" aria-labelledby="boardTitle">
     <button class="close" type="button" data-close="boardModal" aria-label="Close">&#10005;</button>
     <h2 id="boardTitle" class="gold">Leaderboard</h2>
-    <p class="sub" style="margin-bottom:0">Top 10 players</p>
+    <div class="tabs">
+      <button id="tabToday" class="tab on" type="button">Today</button>
+      <button id="tabAll" class="tab" type="button">All time</button>
+    </div>
     <ol id="boardList"></ol>
     <p class="empty" id="boardEmpty" hidden>No scores yet. Play a round to claim the top spot.</p>
     <p class="foot" id="boardFoot">Loading scores.</p>
@@ -502,6 +523,8 @@
   let dbKey = 0;
   let online = false;        // true once the shared board has loaded
   let remote = [];           // best score per player, from the database
+  let remoteToday = [];      // every run made today, from the database
+  const dayStart = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
   let sessionRuns = [];      // scores made since this page opened
 
   async function db(path, options) {
@@ -521,9 +544,14 @@
   }
   async function fetchBoard() {
     try {
-      const res = await db('/leaderboard?select=name,score,seconds,created_at&order=score.desc,created_at.asc&limit=200');
-      const rows = await res.json();
-      remote = rows.map(r => ({ n: String(r.name), s: Number(r.score) || 0, t: Number(r.seconds) || 0, at: Date.parse(r.created_at) || 0 }));
+      const shape = r => ({ n: String(r.name), s: Number(r.score) || 0, t: Number(r.seconds) || 0, at: Date.parse(r.created_at) || 0 });
+      const since = encodeURIComponent(dayStart().toISOString());
+      const [all, today] = await Promise.all([
+        db('/leaderboard?select=name,score,seconds,created_at&order=score.desc,created_at.asc&limit=200').then(r => r.json()),
+        db('/scores?select=name,score,seconds,created_at&created_at=gte.' + since + '&order=score.desc,created_at.asc&limit=500').then(r => r.json())
+      ]);
+      remote = all.map(shape);
+      remoteToday = today.map(shape);
       online = true;
     } catch (e) { online = false; }
     onBoardChanged();
@@ -550,9 +578,16 @@
   }
   // Best score per player, highest first. Online: the shared board plus
   // anything scored in this session. Offline: scores saved on this device.
-  function loadBoard() {
+  function loadBoard(scope) {
     const best = new Map();
-    for (const r of (online ? remote.concat(sessionRuns) : runs)) {
+    let source;
+    if (scope === 'today') {
+      const from = dayStart().getTime();
+      source = online ? remoteToday.concat(sessionRuns) : runs.filter(r => r && r.at >= from);
+    } else {
+      source = online ? remote.concat(sessionRuns) : runs;
+    }
+    for (const r of source) {
       if (!r || typeof r.n !== 'string' || typeof r.s !== 'number') continue;
       const cur = best.get(r.n);
       if (!cur || r.s > cur.s) best.set(r.n, r);
@@ -969,8 +1004,15 @@
   const EVENTS = {
     surge:   { cls: 'surge',   title: 'Speed surge!', sub: 'Numbers are faster!',          chip: 'Speed surge' },
     reverse: { cls: 'reverse', title: 'Reverse!',     sub: 'Your controls are flipped!',   chip: 'Reverse' },
-    dark:    { cls: 'dark',    title: 'Lights out!',  sub: 'You can only see around you!', chip: 'Lights out' }
+    dark:    { cls: 'dark',    title: 'Lights out!',  sub: 'You can only see around you!', chip: 'Lights out' },
+    rain:    { cls: 'rain',    title: 'Number rain!', sub: 'Look up!',                     chip: 'Number rain' }
   };
+
+  // ---------- Version 4: number rain, combo and the danger meter ----------
+  let drops = [], rainTimer = 0;          // small numbers falling during Number Rain
+  const COMBO_WINDOW = 2.5;               // seconds allowed between dots to keep a combo
+  let combo = 0, comboT = 0;
+  let danger = 0, dangerShown = -1;
   const active = type => !!event && freeze <= 0 && event.type === type;
 
   function triggerEvent() {
@@ -1070,6 +1112,9 @@
     $('nextVal').textContent = nextEvent;
     minus = null;
     minusTimer = rand(8, 12);
+    drops = [];
+    combo = 0; comboT = 0; danger = 0;
+    $('combo').hidden = true;
     dash.t = 0; dash.cd = 0; dash.inv = 0; dash.dx = 1; dash.dy = 0;
     ghosts = [];
     rivals = loadBoard().filter(r => r.s > 0);
@@ -1090,6 +1135,7 @@
     closeAll();
     endEvent();
     minus = null;
+    drops = [];
     state = 'title';
     $('title').hidden = false;
     $('hud').hidden = true;
@@ -1149,11 +1195,11 @@
   }
 
   // True when the player overlaps the solid part of a digit.
-  function hitDigit() {
+  function hitDigit(list) {
     if (dash.inv > 0) return null;
     const pts = [[0, 0]];
     for (let i = 0; i < 8; i++) pts.push([Math.cos(i * TAU / 8) * R * 0.72, Math.sin(i * TAU / 8) * R * 0.72]);
-    for (const d of digits) {
+    for (const d of list) {
       if (d.spawn > 0) continue;
       const G = glyphs[d.v];
       if (!G) continue;
@@ -1403,15 +1449,59 @@
       const p = dots[i];
       p.born += dt;
       if (Math.hypot(p.x - player.x, p.y - player.y) < R + Dh * 0.055 + 5) {
-        burst(p.x, p.y, YELLOW, 10, Dh * 1.3);
-        popups.push({ x: p.x, y: p.y - 12, text: '+1', life: 0 });
+        // Combo: dots collected in quick succession. From x3, each dot is worth 2.
+        combo = comboT > 0 ? combo + 1 : 1;
+        comboT = COMBO_WINDOW;
+        const gain = combo >= 3 ? 2 : 1;
+        burst(p.x, p.y, YELLOW, 10 + gain * 4, Dh * 1.3);
+        popups.push({ x: p.x, y: p.y - 12, text: '+' + gain, life: 0 });
         dots[i] = newDot();
-        setScore(score + 1);
-        sfx.dot(score);
+        setScore(score + gain);
+        sfx.dot(score + combo);
       }
     }
 
-    const hit = hitDigit();
+    // Number Rain: small numbers fall from the top while the event runs.
+    if (active('rain')) {
+      rainTimer -= dt;
+      if (rainTimer <= 0) {
+        rainTimer = rand(0.3, 0.55);
+        const x = rand(36, W - 36);
+        // Never drop one straight onto a player who is hugging the top edge.
+        if (!(player.y < Dh * 0.9 && Math.abs(x - player.x) < Dh * 0.5)) {
+          drops.push({ v: 1 + Math.floor(Math.random() * 9), x, y: -Dh * 0.3, vy: Dh * rand(1.3, 1.9), scale: 0.4, spawn: 0, pop: 1, ph: rand(0, TAU) });
+        }
+      }
+    }
+    for (const d of drops) { d.y += d.vy * dt; d.ph += dt * 6; }
+    drops = drops.filter(d => d.y < H + Dh);
+
+    // Combo timer.
+    if (comboT > 0) {
+      comboT -= dt;
+      if (comboT <= 0) combo = 0;
+    }
+    const comboEl = $('combo');
+    if (combo >= 2) {
+      comboEl.hidden = false;
+      $('comboVal').textContent = 'x' + combo;
+      $('comboBar').style.width = Math.max(0, comboT / COMBO_WINDOW * 100) + '%';
+    } else if (!comboEl.hidden) comboEl.hidden = true;
+
+    // Danger meter: how close the nearest number is to the player.
+    let gap = Infinity;
+    for (const d of digits.concat(drops)) {
+      if (d.spawn > 0) continue;
+      const hf = half(d);
+      const q = Math.hypot(Math.max(Math.abs(player.x - d.x) - hf.w, 0), Math.max(Math.abs(player.y - d.y) - hf.h, 0));
+      if (q < gap) gap = q;
+    }
+    const wantDanger = clamp(1 - (gap - R) / (Dh * 1.5), 0, 1);
+    danger += (wantDanger - danger) * Math.min(1, dt * 10);
+    const pct = Math.round(danger * 100);
+    if (pct !== dangerShown) { dangerShown = pct; $('dangerBar').style.width = pct + '%'; }
+
+    const hit = hitDigit(digits) || hitDigit(drops);
     if (hit) gameOver(hit);
   }
 
@@ -1513,6 +1603,21 @@
       drawDigit(ctx, d.v, d.x, d.y, d.scale * d.pop, base, tx, ty, 1 + wob, 1 - wob);
     }
 
+    for (const d of drops) {
+      // A short streak above each falling number.
+      ctx.save();
+      ctx.strokeStyle = 'rgba(46, 230, 255, 0.35)';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y - Dh * 0.28);
+      ctx.lineTo(d.x, d.y - Dh * 0.5);
+      ctx.stroke();
+      ctx.restore();
+      const wob = reduce ? 0 : Math.sin(d.ph) * 0.05;
+      drawDigit(ctx, d.v, d.x, d.y, d.scale * d.pop, 1, player.x, player.y, 1 + wob, 1 - wob);
+    }
+
     if (player.alive) {
       if (state === 'title') {
         const bob = reduce ? 0 : Math.sin(clock * 2.2) * 6;
@@ -1569,7 +1674,7 @@
           ctx.restore();
         }
       } else {
-        const col = event.type === 'surge' ? '255, 138, 61' : '255, 61, 110';
+        const col = event.type === 'surge' ? '255, 138, 61' : event.type === 'rain' ? '46, 160, 255' : '255, 61, 110';
         const pulse = reduce ? 0.2 : 0.16 + 0.1 * Math.sin(clock * 9);
         const gr = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.hypot(W, H) * 0.6);
         gr.addColorStop(0, `rgba(${col}, 0)`);
@@ -1673,8 +1778,19 @@
   }
 
   let boardPoll = 0;
+  let boardScope = 'today';
+  function setScope(scope) {
+    sfx.click();
+    boardScope = scope;
+    renderBoard();
+  }
   function renderBoard() {
-    const all = loadBoard();
+    $('tabToday').classList.toggle('on', boardScope === 'today');
+    $('tabAll').classList.toggle('on', boardScope === 'all');
+    $('boardEmpty').textContent = boardScope === 'today'
+      ? 'No scores yet today. Play a round to claim the top spot.'
+      : 'No scores yet. Play a round to claim the top spot.';
+    const all = loadBoard(boardScope);
     const board = all.slice(0, 10);
     const row = (r, i) =>
       `<li class="r${i + 1}${r.n === playerName ? ' me' : ''}"><span class="rk">#${i + 1}</span><span class="nm">${esc(r.n)}${r.n === playerName ? '<span class="you">YOU</span>' : ''}</span><span class="sc">${r.s}<small>PTS</small></span></li>`;
@@ -1719,6 +1835,8 @@
   $('gotItBtn').addEventListener('click', gotIt);
   $('boardBtn').addEventListener('click', () => { ensureAudio(); openBoard(); });
   $('overBoardBtn').addEventListener('click', openBoard);
+  $('tabToday').addEventListener('click', () => setScope('today'));
+  $('tabAll').addEventListener('click', () => setScope('all'));
   $('nameChip').addEventListener('click', () => { ensureAudio(); sfx.click(); openName(null); });
   $('nameInput').addEventListener('input', onNameInput);
   $('nameGo').addEventListener('click', submitName);
